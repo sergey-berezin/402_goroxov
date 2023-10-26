@@ -25,22 +25,21 @@ namespace NuGetAnswering
         {
             if (!File.Exists(modelpath))
             {
-                try
-                {
-                    await DownloadModelWithRetryAsync();
-                }
-                catch
-                {
-                    throw;
-                }
+                await DownloadModelWithRetryAsync();
             }
             session = new InferenceSession(modelpath);
+        }
+
+        public void change_token(CancellationToken token = default)
+        {
+            cancelToken = token;
         }
 
 
         public Task<string> answer(string text, string question)
         {
             return Task.Factory.StartNew(() => {
+                    cancelToken.ThrowIfCancellationRequested();
                     var sentence = "{\"question\": \"" + question + "\", \"context\": \"@CTX\"}".Replace("@CTX", text);
                     var tokenizer = new BertUncasedLargeTokenizer();
                     var tokens = tokenizer.Tokenize(sentence);
@@ -60,10 +59,12 @@ namespace NuGetAnswering
                                                             NamedOnnxValue.CreateFromTensor("segment_ids", token_type_ids) };
 
                     IDisposableReadOnlyCollection<DisposableNamedOnnxValue>? output;
+                    cancelToken.ThrowIfCancellationRequested();
                     lock (session)
                     {
                         output = session.Run(input);
                     }
+                    cancelToken.ThrowIfCancellationRequested();
 
                     List<float> startLogits = (output.ToList().First().Value as IEnumerable<float>).ToList();
                     List<float> endLogits = (output.ToList().Last().Value as IEnumerable<float>).ToList();
@@ -77,6 +78,7 @@ namespace NuGetAnswering
                                 .ToList();
 
                     var answer = String.Join(" ", predictedTokens);
+                    cancelToken.ThrowIfCancellationRequested();
                     return answer;
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
@@ -97,10 +99,7 @@ namespace NuGetAnswering
                 catch (Exception ex)
                 {
                     ind ++;
-                    if (ind == maxr)
-                    {
-                        throw;
-                    }
+                    throw;
                 }
             }
         }
